@@ -1,2 +1,2 @@
-# DS-Cproject-Sem1
+# DS-Cproject
 Capstone Project for the Johns Hopkins Data Science Specialization
