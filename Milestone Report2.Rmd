@@ -1,0 +1,247 @@
+---
+title: "Captone Project, Milestone Report"
+author: "franmarq@gmail.com"
+date: "16 de mayo de 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE)
+
+```
+
+
+## Introduction
+
+The goal of this project is just to display that you've gotten used to working with the data and that you are on track to create your prediction algorithm. Please submit a report on R Pubs (http://rpubs.com/) that explains your exploratory analysis and your goals for the eventual app and algorithm. This document should be concise and explain only the major features of the data you have identified and briefly summarize your plans for creating the prediction algorithm and Shiny app in a way that would be understandable to a non-data scientist manager. You should make use of tables and plots to illustrate important summaries of the data set.
+
+The motivation for this project is to:
+  
+<br>Demonstrate that you've downloaded the data and have successfully loaded it in.
+<br>Create a basic report of summary statistics about the data sets.
+<br>Report any interesting findings that you amassed so far.
+<br>Get feedback on your plans for creating a prediction algorithm and Shiny app.
+
+##1. Data Processing
+
+### Downloading the data
+
+In this part i'm going to download, unzip y select the data to use. 
+```{r download, eval=FALSE}
+getwd()
+setwd("C:/Cproject")
+name_file <- "Coursera-SwiftKey.zip"
+source <- "http://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+download.file(source, name_file)
+file<- unzip(name_file)
+```
+
+
+### Listing the files and determining files sizes in MB
+
+We have to know the files sizes because is important to decide the stategy to develop the model. I select 'English Language' files for Blogs, Twiiter and News source. 
+
+
+
+```{r files, echo=FALSE}
+paste("Files downloaded:",list.files(path="data/",pattern = "txt",recursive = TRUE, full.names = TRUE))
+paste("Blog Size in MB:",file.size("data/en_US/en_US.blogs.txt")/1024/1024)
+paste("Twitter Size in MB:",file.size("data/en_US/en_US.twitter.txt")/1024/1024)
+paste("News Size in MB:",file.size("data/en_US/en_US.news.txt")/1024/1024)
+
+``` 
+
+### Loading the datasets to use into memory and summarizing its contents
+
+```{r suma,echo=FALSE}
+
+fBlog<- readLines("data/en_US/en_US.blogs.txt",encoding="UTF-8", skipNul = TRUE)
+fTwitter<- readLines("data/en_US/en_US.twitter.txt",encoding="UTF-8", skipNul = TRUE)
+fNews<- readLines("data/en_US/en_US.news.txt",encoding="UTF-8", skipNul = TRUE)
+
+
+Data <- c(fTwitter,fNews,fBlog)
+
+
+
+print(paste("Number of lines in blog:", length (fBlog)))
+print(paste("Number of lines in twitter:", length (fTwitter)))
+print(paste("Number of lines in News:", length (fNews)))
+```
+
+##2. Exploatory Analysis
+
+### Exploring the words counts in the files
+I made a count the total words in the files and summarise it for a initial look the content
+
+```{r freqword, echo=FALSE, eval=TRUE}
+library(stringi)
+library(ggplot2)
+
+blog_words <- stri_count_words(fBlog)
+twi_words <- stri_count_words(fTwitter)
+new_words <- stri_count_words(fNews)
+
+print("Summary of Words in Blog file:")
+summary(blog_words)
+print("Summary of Words in Twitter file:")
+summary(twi_words)
+print("Summary of Words in News file:")
+summary(new_words)
+#paste("Summary of Words in Blog file:",summary(blog_words))
+#paste("Summary of Words in Blog file:",summary(twi_words))
+#paste("Summary of Words in Blog file:",summary(new_words))
+
+qplot(blog_words,xlim=c(1,300), main="Frequecy of Words in entry's Blog file",xlab = "# Words" )
+qplot(twi_words,xlim=c(1,50), main="Frequecy of Words in entry's twitter file",xlab = "# Words" )
+qplot(new_words,xlim=c(1,150), main="Frequecy of Words in entry's news file",xlab = "# Words" )
+
+```
+
+
+
+
+
+### Sampling the files 
+
+In this exploratory stage, i took a sample to handle better the processing of the data. I took 1000 rows from each file and consolidate in a single data frame.
+
+```{r samp, eval=TRUE}
+set.seed(7472)
+sBlog <- fBlog[sample(1:length(fBlog), length(fBlog)*.03)]
+sTwitter <- fTwitter[sample(1:length(fTwitter), length(fTwitter)*.03)]
+sNews <- fNews[sample(1:length(fNews), length(fNews)*.03)]
+# Conslidating the sample files
+sData <- c(sTwitter,sNews,sBlog)
+rm(sBlog,sTwitter,sNews)
+
+write.csv(sData,"data/sData.csv",row.names=F)
+saveRDS(sData,"data/sData.Rdata")
+
+sData <- c(sTwitter,sNews,sBlog)
+sData <- readRDS("data/sData.RData")
+```
+
+### Cleaning the sample
+
+Applique some clean task in the sample, removing Puntuation, Numbers, etc.
+
+```{r clean, eval=TRUE}
+
+library(tm)
+Corp <- Corpus(VectorSource(sData))
+#Corp <- Corpus(VectorSource(Data))
+sSpce  <- content_transformer(function(x, pattern) gsub(pattern, " ", x))
+Corp <- tm_map(Corp, sSpce,"\"|/|@|\\|")
+Corp <- tm_map(Corp, content_transformer(tolower))
+Corp <- tm_map(Corp, removePunctuation)
+Corp <- tm_map(Corp, removeNumbers)
+Corp <- tm_map(Corp, stripWhitespace)
+Corp <- tm_map(Corp, removeWords, stopwords('english'))
+
+saveRDS(Corp, file = "data/sCorp.RData")
+#saveRDS(Corp, file = "data/Corp.RData")
+
+```
+
+
+### Creating ngrams
+
+Start creating nGrams, biGrams and triGrams to see some specific infomation about the data
+
+```{r ngram, eval=TRUE}
+
+library(RWeka)
+fNGrams <- function(Corp, grams, top) {
+  ngram <- NGramTokenizer(Corp, Weka_control(min = grams, max = grams,
+                                             delimiters = " \\r\\n\\t.,;:\"()?!"))
+  ngram <- data.frame(table(ngram))
+  ngram <- ngram[order(ngram$Freq, decreasing = TRUE),]#[1:top,]
+  colnames(ngram) <- c("Words","Count")
+  ngram
+}
+
+
+monGrams   <- fNGrams(Corp, 1, 100)
+monGrams$word1<-monGrams$Words 
+#head(monGrams)
+
+write.csv(monGrams,"data/monGrams.csv",row.names=F)
+saveRDS(monGrams,"data/monGrams.Rdata")
+  
+biGrams     <- fNGrams(Corp, 2,100)
+##
+biGrams$Words <- as.character(biGrams$Words)
+word_split <- strsplit(biGrams$Words,split=" ")
+biGrams <- transform(biGrams,word1= sapply(word_split,"[[",1),word2= sapply(word_split,"[[",2))
+#head(biGrams)
+##
+write.csv(biGrams,"data/biGrams.csv",row.names=F)
+saveRDS(biGrams,"data/biGrams.Rdata")
+
+triGrams    <- fNGrams(Corp, 3,100)
+##
+triGrams$Words <- as.character(triGrams$Words)
+word_split <- strsplit(triGrams$Words,split=" ")
+triGrams <- transform(triGrams,word1= sapply(word_split,"[[",1),word2= sapply(word_split,"[[",2),word3= sapply(word_split,"[[",3))
+#head(triGrams)
+##
+
+write.csv(triGrams,"data/triGrams.csv",row.names=F)
+saveRDS(triGrams,"data/triGrams.Rdata")
+
+### 4
+
+quGrams    <- fNGrams(Corp, 4,100)
+##
+quGrams$Words <- as.character(quGrams$Words)
+word_split <- strsplit(quGrams$Words,split=" ")
+quGrams <- transform(quGrams,word1= sapply(word_split,"[[",1),word2= sapply(word_split,"[[",2),word3= sapply(word_split,"[[",3),word4= sapply(word_split,"[[",4))
+head(quGrams)
+##
+
+write.csv(quGrams,"data/quGrams.csv",row.names=F)
+saveRDS(quGrams,"data/quGrams.Rdata")
+
+
+
+
+
+
+
+```
+
+### PLotting the Ngrams
+
+PLot the NGrams to examinate the most frequent terms.
+
+```{r plotngram, eval=TRUE, echo=FALSE}
+
+library(ggplot2)
+n <- 20 # number of ngrams to show in the graph
+
+# Plotting of the top 20 nGrams
+ggplot(monGrams[1:n,], aes(x =reorder(Words,Count), y = Count))   + geom_bar(stat = "identity") + 
+  coord_flip()
+# Plotting of the tops 20 biGrams
+ggplot(biGrams[1:n,], aes(x =reorder(Words,Count), y = Count))   + geom_bar(stat = "identity") + 
+  coord_flip()
+# Plotting of the top 20 triGrams
+ggplot(triGrams[1:n,], aes(x =reorder(Words,Count), y = Count))   + geom_bar(stat = "identity") + 
+  coord_flip()
+```
+
+## 3. INITIALS OBSERVATIONS
+<br>a. the data source is in a free format, and comes with a lot of useless content, for that reason is important to make carefully some task to process, clean and transforms in proper order to obtain significant information to build a model.
+<br>b. The size of the files forces to take samples to work in the stage of construction and analysis of the model, and will require and additional effort to optimize the app's time response   
+
+
+## 4. NEXT STEPS
+
+1. Tockenization of words with Ngrams. 
+2. Work with a small sample to get more useful info (~5%).
+3. Works with data compression. 
+4. Segment and reduce the data to select the more relevant info.
+5. Use Machine Learning tecniques to develop the predictive model.
+
+
